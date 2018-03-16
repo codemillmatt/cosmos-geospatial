@@ -20,7 +20,7 @@ namespace CosmosGeo.Core
         public string LocationName { get; set; }
 
         [JsonProperty("geometry")]
-        public Microsoft.Azure.Documents.Spatial.Geometry Geometry { get; set; }
+        public Microsoft.Azure.Documents.Spatial.Geometry Location { get; set; }
 
         [JsonProperty("id")]
         public string Id { get; set; }

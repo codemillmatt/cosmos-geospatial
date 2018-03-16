@@ -24,7 +24,7 @@ namespace CosmosGeo.Core
 
             var featureList = new List<string>
             {
-                "Madison","Chicago","Wisconsin","I-39","I-41","I-43","I-90","I-94"
+                "Madison","Milwaukee", "Chicago","Wisconsin","I-39","I-41","I-43","I-90","I-94"
             };
 
             foreach (var feature in featureList)
@@ -36,97 +36,127 @@ namespace CosmosGeo.Core
 
             operation.Items.Add("Intersects");
             operation.Items.Add("Within");
+            operation.Items.Add("Distance");
+
             operation.SelectedIndex = 0;
 
             calculate.Clicked += async (sender, args) =>
             {
                 var feature = await GetFeatureFromCosmos(firstFeature.SelectedItem.ToString());
 
-                var foundFeatures = new List<Feature>();
+                string operationResults = "";
+
 
                 if (operation.SelectedItem.ToString() == "Intersects")
-                    foundFeatures = await Intersects(feature);
+                    operationResults = await Intersects(feature);
+                else if (operation.SelectedItem.ToString() == "Distance")
+                    operationResults = await Distance(feature);
                 else
-                    foundFeatures = await Within(feature);
+                    operationResults = await Within(feature);
 
-                StringBuilder theResults = new StringBuilder();
-                foreach (var found in foundFeatures)
-                {
-                    theResults.AppendLine(found.LocationName);
-                }
-
-                results.Text = theResults.ToString();
+                results.Text = operationResults;
             };
         }
 
         async Task<Feature> GetFeatureFromCosmos(string featureName)
         {
-            //DocumentCollection dc = await client.ReadDocumentCollectionAsync(collectionUri);
-            //dc.IndexingPolicy = new IndexingPolicy(new SpatialIndex(DataType.Point));
-            //await client.ReplaceDocumentCollectionAsync(dc);
-
-            //await Task.Delay(TimeSpan.FromSeconds(10));
-
             Feature feature = null;
+
             // Query for the feature name
-            var featureQuery = client.CreateDocumentQuery<Feature>(collectionUri).Where(f => f.LocationName == featureName).Take(1).AsDocumentQuery();
+            var featureQuery = client.CreateDocumentQuery<Feature>(collectionUri)
+                                     .Where(f => f.LocationName == featureName)
+                                     .Take(1)
+                                     .AsDocumentQuery();
 
             // For this example - only interested in the first one
             if (featureQuery.HasMoreResults)
             {
                 var featureResult = await featureQuery.ExecuteNextAsync<Feature>();
 
-                feature = featureResult.FirstOrDefault();
+                return featureResult.FirstOrDefault();
             }
 
             return feature;
         }
 
-        async Task<List<Feature>> Within(Feature feature)
+        async Task<string> Within(Feature feature)
         {
-            List<Feature> containedFeatures = new List<Feature>();
+            var withinBuilder = new StringBuilder();
 
-            var feedOptions = new FeedOptions { EnableScanInQuery = true, MaxItemCount = -1 };
-            var containsQuery = client.CreateDocumentQuery<Feature>(collectionUri, feedOptions)
-                                      //.Where(f => feature.Id != f.Id)
-                                      .Where(f => f.Geometry.Within(feature.Geometry))
-                                      .AsDocumentQuery();
+            var withinQuery = client.CreateDocumentQuery<Feature>(collectionUri)
+                  .Where(f => feature.Id != f.Id) // Ignore passed in
+                  .Where(f => f.Location.Within(feature.Location))
+                                    .Select(f => f.LocationName)
+                  .AsDocumentQuery();
 
-            while (containsQuery.HasMoreResults)
+            while (withinQuery.HasMoreResults)
             {
-                var containsResults = await containsQuery.ExecuteNextAsync<Feature>();
+                var withinResults = await withinQuery.ExecuteNextAsync<string>();
 
-                containedFeatures.AddRange(containsResults);
+                foreach (var item in withinResults)
+                {
+                    withinBuilder.AppendLine(item);
+                }
             }
 
-            return containedFeatures;
+            return withinBuilder.ToString();
         }
 
-        async Task<List<Feature>> Intersects(Feature feature)
+        async Task<string> Intersects(Feature feature)
         {
-            List<Feature> intersectingFeatures = new List<Feature>();
+            var intersectBuilder = new StringBuilder();
 
-            var feedOptions = new FeedOptions { EnableScanInQuery = true, MaxItemCount = -1 };
-
-            Microsoft.Azure.Documents.Spatial.Point p = new Microsoft.Azure.Documents.Spatial.Point(-87.655, 41.948);
-
-            var ls = feature.Geometry as LineString;
-
-            var intersectingQuery = client.CreateDocumentQuery<Feature>(collectionUri, feedOptions)
-                                          //.Where(f => feature.Id != f.Id)
-                                          .Where(f => ls.Intersects(f.Geometry))
-                                          //.Where(f => f.Geometry.Intersects(ls))
-                                          //.Where(f => feature.Geometry.Intersects(f.Geometry))
-                                          .AsDocumentQuery();
+            var intersectingQuery = client.CreateDocumentQuery<Feature>(collectionUri)
+                  .Where(f => feature.Id != f.Id) // Ignore passed in
+                  .Where(f => feature.Location.Intersects(f.Location))
+                                          .Select(f => f.LocationName)
+                  .AsDocumentQuery();
 
             while (intersectingQuery.HasMoreResults)
             {
-                var intersectsResults = await intersectingQuery.ExecuteNextAsync<Feature>();
+                var intersectsResults = await intersectingQuery.ExecuteNextAsync<string>();
 
-                intersectingFeatures.AddRange(intersectsResults);
+                foreach (var item in intersectsResults)
+                {
+                    intersectBuilder.AppendLine(item);
+                }
             }
 
-            return intersectingFeatures;
+            return intersectBuilder.ToString();
+        }
+
+
+        async Task<string> Distance(Feature feature)
+        {
+            var cheeseFestival = await GetFeatureFromCosmos("CheeseFest");
+
+            // Geometry property is Microsoft.Azure.Documents.Spatial.Geometry
+            var distanceQuery = client.CreateDocumentQuery<Feature>(collectionUri)
+                                      .Where(f => f.Id == feature.Id)
+                                      .Select(f => cheeseFestival.Location.Distance(f.Location))
+                                      .AsDocumentQuery();
+
+            var distanceBuilder = new StringBuilder();
+
+            while (distanceQuery.HasMoreResults)
+            {
+                var distanceResults = await distanceQuery.ExecuteNextAsync<double>();
+
+                foreach (var item in distanceResults)
+                {
+                    distanceBuilder.AppendLine($"Distance to the Cheese Fest is {Math.Round(item.MeterToMiles(), 2)} mi");
+                }
+            }
+
+            return distanceBuilder.ToString();
+        }
+    }
+
+    public static class MileConversion
+    {
+        public static double MeterToMiles(this double meters)
+        {
+            return meters * 0.000621371;
         }
     }
 }
